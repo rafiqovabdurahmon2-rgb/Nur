@@ -16,6 +16,7 @@ module.exports = async (req, res) => {
 async function chat({ system = '', messages = [] }, res) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return res.status(500).json({ error: 'GEMINI_API_KEY йўқ' });
+  // Ҳар бир моделнинг бепул лимити алоҳида: биттаси тугаса, кейингиси синалади
   const models = [process.env.GEMINI_MODEL, 'gemini-flash-latest', 'gemini-flash-lite-latest',
     'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview',
     'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemma-3-27b-it'].filter(Boolean);
@@ -50,4 +51,25 @@ async function chat({ system = '', messages = [] }, res) {
     }
     lastErr = (j.error && j.error.message) || 'HTTP ' + r.status;
     if (r.status === 401 || r.status === 403) return res.status(502).json({ error: 'Gemini калити нотўғри: ' + lastErr });
-    if (r
+    if (r.status === 429) sawLimit = true;
+  }
+  if (sawLimit) return res.status(429).json({ error: 'limit' });
+  return res.status(502).json({ error: lastErr });
+}
+
+async function tts({ text = '' }, res) {
+  const key = process.env.ELEVENLABS_API_KEY;
+  if (!key) return res.status(501).json({ error: 'no tts key' });
+  const voice = process.env.ELEVENLABS_VOICE_ID || 'pNInz6obpgDQGcFmaJgB';
+  const model = process.env.ELEVENLABS_MODEL || 'eleven_multilingual_v2';
+  const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_64`, {
+    method: 'POST',
+    headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+    body: JSON.stringify({ text: String(text).slice(0, 600), model_id: model }),
+  });
+  if (!r.ok) { const t = await r.text().catch(() => ''); return res.status(502).json({ error: t.slice(0, 300) }); }
+  const buf = Buffer.from(await r.arrayBuffer());
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(200).send(buf);
+}
